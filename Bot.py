@@ -1,36 +1,44 @@
 import os
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+import telebot
 import google.generativeai as genai
 
-# Configurações usando Variáveis de Ambiente (que você vai colocar no Render)
+# Configuração
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-# Configuração do Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-pro')
 
-# Configuração de logs
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Configurando o "Cérebro" com personalidade
+model = genai.GenerativeModel(
+    model_name='gemini-pro',
+    system_instruction="Você é um colaborador inteligente, leve, amigo e um excelente professor. Você sempre auxilia com paciência, clareza e um tom acolhedor. Você tem memória das conversas anteriores."
+)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Olá! Sou o seu bot. Como posso te ajudar hoje?")
+# Dicionário para guardar o histórico de cada usuário (Memória)
+chat_histories = {}
 
-async def responder_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    response = model.generate_content(user_text)
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=response.text)
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "Olá! Estou aqui, pronto para aprender e conversar com você. Como posso te ajudar?")
+
+@bot.message_handler(func=lambda message: True)
+def responder_tudo(message):
+    chat_id = message.chat.id
+    user_text = message.text
+    
+    # Se o usuário não tem histórico, criamos uma nova sessão de chat
+    if chat_id not in chat_histories:
+        chat_histories[chat_id] = model.start_chat(history=[])
+    
+    try:
+        # Envia a mensagem mantendo o histórico (memória)
+        response = chat_histories[chat_id].send_message(user_text)
+        bot.reply_to(message, response.text)
+    except Exception as e:
+        bot.reply_to(message, "Ops, parece que precisei de um tempo para processar. Pode repetir?")
 
 if __name__ == '__main__':
-    application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    bot.polling()
     
-    start_handler = CommandHandler('start', start)
-    message_handler = MessageHandler(filters.TEXT & (~filters.COMMAND), responder_gemini)
-    
-    application.add_handler(start_handler)
-    application.add_handler(message_handler)
-    
-    application.run_polling()
-  
